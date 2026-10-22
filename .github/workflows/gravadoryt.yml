@@ -93,7 +93,7 @@ jobs:
                   'categoryId': '20' # Categoria 20 = Gaming
               },
               'status': {
-                  'privacyStatus': 'unlisted', # 'private', 'unlisted' (não listado) ou 'public'
+                  'privacyStatus': 'private', # 'private', 'unlisted' (não listado) ou 'public'
                   'selfDeclaredMadeForKids': False
               }
           }
