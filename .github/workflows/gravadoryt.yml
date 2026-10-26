@@ -1,4 +1,4 @@
-name: Gravadormulti
+name: Gravador Kick e Twitch para YouTube
 
 on:
   schedule:
@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Instalar Dependências (Streamlink e YouTube Upload)
+      - name: Instalar Dependências (Streamlink e Google API)
         run: |
           python -m pip install --upgrade pip
           pip install streamlink google-api-python-client google-auth-oauthlib google-auth-httplib2
@@ -43,25 +43,38 @@ jobs:
           ${{ secrets.YOUTUBE_TOKEN }}
           EOF
 
-      - name: Gravar Vídeo da Live
+      - name: Checar e Gravar Live (Kick ou Twitch)
         id: gravacao
         run: |
-          echo "Checando se o canal snopey está ao vivo na Kick..."
           DATA=$(date +%d-%m-%Y)
-          NOME_ARQUIVO="live_snopey_${DATA}.mp4"
-          
+          GRAVOU=false
+          ARQUIVO=""
+
+          echo "Verificando se o canal snopey está ao vivo..."
+
+          # 1. Checa a Kick
           if streamlink kick.com/snopey best --stream-url > /dev/null 2>&1; then
-            echo "Canal online na Kick! Iniciando gravação..."
-            streamlink kick.com/snopey best -o "$NOME_ARQUIVO"
-            echo "gravou=true" >> $GITHUB_OUTPUT
-            echo "arquivo=$NOME_ARQUIVO" >> $GITHUB_OUTPUT
-            echo "data=$DATA" >> $GITHUB_OUTPUT
+            echo "Canal ONLINE na Kick! Iniciando gravação..."
+            ARQUIVO="snopey_kick_${DATA}.mp4"
+            streamlink kick.com/snopey best -o "$ARQUIVO"
+            GRAVOU=true
+
+          # 2. Se não estiver na Kick, checa a Twitch
+          elif streamlink twitch.tv/snopey best --stream-url > /dev/null 2>&1; then
+            echo "Canal ONLINE na Twitch! Iniciando gravação..."
+            ARQUIVO="snopey_twitch_${DATA}.mp4"
+            streamlink twitch.tv/snopey best -o "$ARQUIVO"
+            GRAVOU=true
+
           else
-            echo "Canal offline na Kick. Nenhuma gravação iniciada."
-            echo "gravou=false" >> $GITHUB_OUTPUT
+            echo "Canal OFFLINE na Kick e na Twitch. Nenhuma gravação iniciada."
           fi
 
-      - name: Script Python para Envio ao YouTube
+          echo "gravou=$GRAVOU" >> $GITHUB_OUTPUT
+          echo "arquivo=$ARQUIVO" >> $GITHUB_OUTPUT
+          echo "data=$DATA" >> $GITHUB_OUTPUT
+
+      - name: Enviar Vídeo para o YouTube
         if: steps.gravacao.outputs.gravou == 'true'
         env:
           ARQUIVO_VIDEO: ${{ steps.gravacao.outputs.arquivo }}
@@ -78,29 +91,31 @@ jobs:
           data = os.environ.get("DATA_LIVE")
 
           if not arquivo or not os.path.exists(arquivo):
-              print("Arquivo de vídeo não encontrado.")
+              print("Arquivo de vídeo não encontrado para upload.")
               sys.exit(1)
 
-          # Carrega credenciais salvas
+          # Identifica a plataforma pelo nome do arquivo para o título
+          plataforma = "Kick" if "kick" in arquivo else "Twitch"
+
           creds = Credentials.from_authorized_user_file('request_token.json')
           youtube = build('youtube', 'v3', credentials=creds)
 
           body = {
               'snippet': {
-                  'title': f'Live Snopey - {data}',
-                  'description': 'Gravação automática da live transmitida na Kick.',
-                  'tags': ['snopey', 'kick', 'live', 'gameplay'],
-                  'categoryId': '20' # Categoria 20 = Gaming
+                  'title': f'Live Snopey ({plataforma}) - {data}',
+                  'description': f'Gravação automática da live transmitida na {plataforma}.',
+                  'tags': ['snopey', plataforma.lower(), 'live', 'gameplay'],
+                  'categoryId': '20' # Categoria Gaming
               },
               'status': {
-                  'privacyStatus': 'private', # 'private', 'unlisted' (não listado) ou 'public'
+                  'privacyStatus': 'unlisted', # 'private', 'unlisted' ou 'public'
                   'selfDeclaredMadeForKids': False
               }
           }
 
           media = MediaFileUpload(arquivo, chunksize=-1, resumable=True, mimetype='video/mp4')
 
-          print(f"Iniciando o envio de {arquivo} para o YouTube...")
+          print(f"Iniciando envio do vídeo {arquivo} para o YouTube...")
           request = youtube.videos().insert(
               part=','.join(body.keys()),
               body=body,
